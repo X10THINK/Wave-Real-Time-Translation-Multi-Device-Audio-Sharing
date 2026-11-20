@@ -211,6 +211,7 @@ class WaveController extends ChangeNotifier {
       joinApproval: d.joinApproval,
       hostName: displayName,
       audioSource: d.audioSource,
+      track: d.track,
       sourceLanguage: d.sourceLanguage,
       targetLanguage: d.targetLanguage,
       translatedVoice: d.translatedVoice,
@@ -253,7 +254,7 @@ class WaveController extends ChangeNotifier {
 
   void changeStatus(String id, SessionStatus status) {
     final s = getSession(id);
-    if (s == null || !s.isActive) return;
+    if (s == null || !s.isActive || s.status == status) return;
     repository.put(s.copyWith(status: status));
     _saveHistory();
     notifyListeners();
