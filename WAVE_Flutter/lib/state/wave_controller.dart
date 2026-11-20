@@ -131,28 +131,33 @@ class WaveController extends ChangeNotifier {
       final raw = await _prefs.getString('sessions');
       if (raw != null) {
         try {
-          for (final m in (jsonDecode(raw) as List).reversed) {
-            repository.put(
-              WaveSession(
-                id: m['id'],
-                name: m['name'],
-                feature: WaveFeature.values.byName(m['feature']),
-                method: TransferMethod.values.byName(m['method']),
-                role: SessionRole.values.byName(m['role']),
-                status: SessionStatus.values.byName(m['status']),
-                createdAt: DateTime.parse(m['created']),
-                participants: m['participants'] ?? 0,
-                maxParticipants: m['capacity'] ?? 10,
-                joinApproval: m['approval'] ?? false,
-                hostName: m['hostName'] ?? 'Host',
-                audioSource: AudioSource.values.byName(m['source'] ?? 'music'),
-                targetLanguage: m['language'] ?? defaultLanguage,
-                sourceLanguage: m['sourceLanguage'] ?? 'English',
-                translatedVoice: m['translatedVoice'] ?? true,
-                liveCaptions: m['liveCaptions'] ?? true,
-                speakingRequests: m['speakingRequests'] ?? false,
-              ),
-            );
+          for (final entry in (jsonDecode(raw) as List).reversed) {
+            try {
+              final m = entry as Map<String, dynamic>;
+              repository.put(
+                WaveSession(
+                  id: m['id'],
+                  name: m['name'],
+                  feature: WaveFeature.values.byName(m['feature']),
+                  method: TransferMethod.values.byName(m['method']),
+                  role: SessionRole.values.byName(m['role']),
+                  status: SessionStatus.values.byName(m['status']),
+                  createdAt: DateTime.parse(m['created']),
+                  participants: m['participants'] ?? 0,
+                  maxParticipants: m['capacity'] ?? 10,
+                  joinApproval: m['approval'] ?? false,
+                  hostName: m['hostName'] ?? 'Host',
+                  audioSource: AudioSource.values.byName(m['source'] ?? 'music'),
+                  targetLanguage: m['language'] ?? defaultLanguage,
+                  sourceLanguage: m['sourceLanguage'] ?? 'English',
+                  translatedVoice: m['translatedVoice'] ?? true,
+                  liveCaptions: m['liveCaptions'] ?? true,
+                  speakingRequests: m['speakingRequests'] ?? false,
+                ),
+              );
+            } catch (e) {
+              debugPrint('Skipping invalid saved session record: $e');
+            }
           }
         } catch (e) {
           debugPrint('Invalid saved history: $e');
