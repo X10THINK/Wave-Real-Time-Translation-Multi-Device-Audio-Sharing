@@ -59,10 +59,7 @@ void main() {
 
     repository.put(original);
     repository.put(
-      original.copyWith(
-        status: SessionStatus.live,
-        participants: 3,
-      ),
+      original.copyWith(status: SessionStatus.live, participants: 3),
     );
 
     expect(repository.getAll(), hasLength(1));
@@ -79,10 +76,7 @@ void main() {
       ..roomName = 'Test Session'
       ..method = TransferMethod.wifi;
 
-    final session = controller.createSession(
-      draft,
-      roomCode: 'ROOM-102',
-    );
+    final session = controller.createSession(draft, roomCode: 'ROOM-102');
 
     controller.endSession(session.id);
     controller.changeStatus(session.id, SessionStatus.live);
@@ -95,51 +89,55 @@ void main() {
     controller.dispose();
   });
 
+  test(
+    'host session metadata preserves draft translation preferences',
+    () async {
+      final controller = WaveController(InMemorySessionRepository());
+      final draft = SessionDraft(WaveFeature.translation)
+        ..roomName = 'Multilingual Discussion'
+        ..method = TransferMethod.wifi
+        ..sourceLanguage = 'Sinhala'
+        ..targetLanguage = 'English'
+        ..translatedVoice = false
+        ..liveCaptions = false
+        ..speakingRequests = true;
 
-  test('host session metadata preserves draft translation preferences', () async {
-    final controller = WaveController(InMemorySessionRepository());
-    final draft = SessionDraft(WaveFeature.translation)
-      ..roomName = 'Multilingual Discussion'
-      ..method = TransferMethod.wifi
-      ..sourceLanguage = 'Sinhala'
-      ..targetLanguage = 'English'
-      ..translatedVoice = false
-      ..liveCaptions = false
-      ..speakingRequests = true;
+      final session = controller.createSession(draft, roomCode: 'HOST-TEST');
 
-    final session = controller.createSession(draft, roomCode: 'HOST-TEST');
+      expect(session.sourceLanguage, 'Sinhala');
+      expect(session.targetLanguage, 'English');
+      expect(session.translatedVoice, isFalse);
+      expect(session.liveCaptions, isFalse);
+      expect(session.speakingRequests, isTrue);
 
-    expect(session.sourceLanguage, 'Sinhala');
-    expect(session.targetLanguage, 'English');
-    expect(session.translatedVoice, isFalse);
-    expect(session.liveCaptions, isFalse);
-    expect(session.speakingRequests, isTrue);
+      await controller.flush();
+      controller.dispose();
+    },
+  );
 
-    await controller.flush();
-    controller.dispose();
-  });
+  test(
+    'receiver session metadata preserves draft translation preferences',
+    () async {
+      final controller = WaveController(InMemorySessionRepository());
+      final draft = SessionDraft(WaveFeature.translation)
+        ..roomCode = 'RECV-TEST'
+        ..method = TransferMethod.hotspot
+        ..sourceLanguage = 'Sinhala'
+        ..targetLanguage = 'English'
+        ..translatedVoice = false
+        ..liveCaptions = false
+        ..speakingRequests = true;
 
-  test('receiver session metadata preserves draft translation preferences', () async {
-    final controller = WaveController(InMemorySessionRepository());
-    final draft = SessionDraft(WaveFeature.translation)
-      ..roomCode = 'RECV-TEST'
-      ..method = TransferMethod.hotspot
-      ..sourceLanguage = 'Sinhala'
-      ..targetLanguage = 'English'
-      ..translatedVoice = false
-      ..liveCaptions = false
-      ..speakingRequests = true;
+      final session = controller.joinSession(draft);
 
-    final session = controller.joinSession(draft);
+      expect(session.sourceLanguage, 'Sinhala');
+      expect(session.targetLanguage, 'English');
+      expect(session.translatedVoice, isFalse);
+      expect(session.liveCaptions, isFalse);
+      expect(session.speakingRequests, isTrue);
 
-    expect(session.sourceLanguage, 'Sinhala');
-    expect(session.targetLanguage, 'English');
-    expect(session.translatedVoice, isFalse);
-    expect(session.liveCaptions, isFalse);
-    expect(session.speakingRequests, isTrue);
-
-    await controller.flush();
-    controller.dispose();
-  });
-
+      await controller.flush();
+      controller.dispose();
+    },
+  );
 }

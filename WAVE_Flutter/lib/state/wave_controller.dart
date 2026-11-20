@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../core/native/wave_native.dart';
 import '../domain/models/wave_session.dart';
 import '../domain/repositories/session_repository.dart';
@@ -32,11 +34,10 @@ class WaveController extends ChangeNotifier {
     return null;
   }
 
-  SessionDraft draft(WaveFeature feature) =>
-      SessionDraft(feature)
-        ..displayName = displayName
-        ..targetLanguage = defaultLanguage
-        ..volume = defaultVolume;
+  SessionDraft draft(WaveFeature feature) => SessionDraft(feature)
+    ..displayName = displayName
+    ..targetLanguage = defaultLanguage
+    ..volume = defaultVolume;
   void _saveHistory() {
     if (_restoring) return;
     final data = jsonEncode(
@@ -81,24 +82,22 @@ class WaveController extends ChangeNotifier {
         'microphone' => AudioSource.microphone,
         _ => s.audioSource,
       };
-      final status =
-          !n.hosting && !n.joined
-              ? SessionStatus.reconnecting
-              : st['hostStreamPaused'] == true
-              ? SessionStatus.paused
-              : s.status == SessionStatus.lobby && n.captureSource == 'off'
-              ? SessionStatus.lobby
-              : SessionStatus.live;
+      final status = !n.hosting && !n.joined
+          ? SessionStatus.reconnecting
+          : st['hostStreamPaused'] == true
+          ? SessionStatus.paused
+          : s.status == SessionStatus.lobby && n.captureSource == 'off'
+          ? SessionStatus.lobby
+          : SessionStatus.live;
       repository.put(
         s.copyWith(
           role: n.hosting ? SessionRole.host : SessionRole.receiver,
           status: status,
           participants: n.connected,
           audioSource: source,
-          name:
-              (st['sessionName'] as String?)?.isNotEmpty == true
-                  ? st['sessionName'] as String
-                  : null,
+          name: (st['sessionName'] as String?)?.isNotEmpty == true
+              ? st['sessionName'] as String
+              : null,
         ),
       );
     }
@@ -159,10 +158,9 @@ class WaveController extends ChangeNotifier {
           WaveSession(
             id: n.currentRoom,
             name: st['sessionName']?.toString() ?? 'WAVE Room',
-            feature:
-                n.currentFeature == 'translation'
-                    ? WaveFeature.translation
-                    : WaveFeature.audio,
+            feature: n.currentFeature == 'translation'
+                ? WaveFeature.translation
+                : WaveFeature.audio,
             method: TransferMethod.values.byName(n.currentMode),
             role: n.hosting ? SessionRole.host : SessionRole.receiver,
             status: SessionStatus.live,
@@ -211,14 +209,14 @@ class WaveController extends ChangeNotifier {
   }
 
   WaveSession joinSession(SessionDraft d) {
-    final st =
-        _observeNative ? WaveNative.instance.state : const <String, dynamic>{};
+    final st = _observeNative
+        ? WaveNative.instance.state
+        : const <String, dynamic>{};
     final s = WaveSession(
       id: d.roomCode,
-      name:
-          st['sessionName']?.toString().isNotEmpty == true
-              ? st['sessionName'].toString()
-              : 'WAVE Room',
+      name: st['sessionName']?.toString().isNotEmpty == true
+          ? st['sessionName'].toString()
+          : 'WAVE Room',
       feature: d.feature,
       method: d.method ?? TransferMethod.wifi,
       role: SessionRole.receiver,
