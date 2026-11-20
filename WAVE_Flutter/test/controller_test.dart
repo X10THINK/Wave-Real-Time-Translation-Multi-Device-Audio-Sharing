@@ -204,4 +204,63 @@ void main() {
     await controller.flush();
     controller.dispose();
   });
+
+  test('repeated state updates do not notify listeners', () async {
+    final controller = WaveController(InMemorySessionRepository());
+    final draft = SessionDraft(WaveFeature.audio)
+      ..roomName = 'Lifecycle Test';
+    final session = controller.createSession(
+      draft,
+      roomCode: 'LIFECYCLE-101',
+    );
+
+    var notifications = 0;
+    controller.addListener(() => notifications++);
+
+    controller.changeStatus(session.id, SessionStatus.lobby);
+    expect(notifications, 0);
+
+    controller.changeStatus(session.id, SessionStatus.live);
+    expect(notifications, 1);
+
+    controller.changeStatus(session.id, SessionStatus.live);
+    expect(notifications, 1);
+
+    controller.endSession(session.id);
+    expect(notifications, 2);
+
+    controller.endSession(session.id);
+    controller.changeStatus(session.id, SessionStatus.live);
+    controller.changeStatus('MISSING', SessionStatus.live);
+    expect(notifications, 2);
+    expect(controller.getSession(session.id)?.status, SessionStatus.ended);
+
+    await controller.flush();
+    controller.dispose();
+  });
+
+  test('host session retains its selected audio track', () async {
+    const selectedTrack = WaveTrack(
+      'Demo Recording',
+      'WAVE Test',
+      Duration(minutes: 2),
+    );
+    final controller = WaveController(InMemorySessionRepository());
+    final draft = SessionDraft(WaveFeature.audio)
+      ..roomName = 'Music Share'
+      ..audioSource = AudioSource.music
+      ..track = selectedTrack;
+
+    final session = controller.createSession(
+      draft,
+      roomCode: 'TRACK-101',
+    );
+
+    expect(session.track, same(selectedTrack));
+    expect(controller.getSession(session.id)?.track, same(selectedTrack));
+
+    await controller.flush();
+    controller.dispose();
+  });
+
 }
