@@ -198,7 +198,11 @@ class WaveController extends ChangeNotifier {
       joinApproval: d.joinApproval,
       hostName: displayName,
       audioSource: d.audioSource,
+      sourceLanguage: d.sourceLanguage,
       targetLanguage: d.targetLanguage,
+      translatedVoice: d.translatedVoice,
+      liveCaptions: d.liveCaptions,
+      speakingRequests: d.speakingRequests,
     );
     repository.put(s);
     _saveHistory();
@@ -222,6 +226,9 @@ class WaveController extends ChangeNotifier {
       createdAt: DateTime.now(),
       targetLanguage: d.targetLanguage,
       sourceLanguage: d.sourceLanguage,
+      translatedVoice: d.translatedVoice,
+      liveCaptions: d.liveCaptions,
+      speakingRequests: d.speakingRequests,
       maxParticipants: (st['capacity'] as num?)?.toInt() ?? 10,
       joinApproval: st['approval'] == true,
     );
