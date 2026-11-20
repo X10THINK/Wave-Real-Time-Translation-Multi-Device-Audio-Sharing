@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -140,4 +143,35 @@ void main() {
       controller.dispose();
     },
   );
+
+  test('session history preserves translation settings', () async {
+    final controller = WaveController(InMemorySessionRepository());
+    final draft = SessionDraft(WaveFeature.translation)
+      ..roomName = 'Multilingual Meeting'
+      ..method = TransferMethod.wifi
+      ..sourceLanguage = 'Sinhala'
+      ..targetLanguage = 'English'
+      ..translatedVoice = false
+      ..liveCaptions = false
+      ..speakingRequests = true;
+
+    final session = controller.createSession(draft, roomCode: 'HISTORY-001');
+    controller.setSessionLanguage(session.id, 'Tamil');
+    await controller.flush();
+
+    final raw = await SharedPreferencesAsync().getString('sessions');
+    expect(raw, isNotNull);
+    final saved =
+        (jsonDecode(raw!) as List<dynamic>).cast<Map<String, dynamic>>().single;
+
+    expect(saved['id'], 'HISTORY-001');
+    expect(saved['language'], 'Tamil');
+    expect(saved['sourceLanguage'], 'Sinhala');
+    expect(saved['translatedVoice'], isFalse);
+    expect(saved['liveCaptions'], isFalse);
+    expect(saved['speakingRequests'], isTrue);
+
+    controller.dispose();
+  });
+
 }
