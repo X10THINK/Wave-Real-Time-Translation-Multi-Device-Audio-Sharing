@@ -58,6 +58,10 @@ class WaveController extends ChangeNotifier {
               'hostName': s.hostName,
               'source': s.audioSource.name,
               'language': s.targetLanguage,
+              'sourceLanguage': s.sourceLanguage,
+              'translatedVoice': s.translatedVoice,
+              'liveCaptions': s.liveCaptions,
+              'speakingRequests': s.speakingRequests,
             },
           )
           .toList(),
@@ -143,6 +147,10 @@ class WaveController extends ChangeNotifier {
                 hostName: m['hostName'] ?? 'Host',
                 audioSource: AudioSource.values.byName(m['source'] ?? 'music'),
                 targetLanguage: m['language'] ?? defaultLanguage,
+                sourceLanguage: m['sourceLanguage'] ?? 'English',
+                translatedVoice: m['translatedVoice'] ?? true,
+                liveCaptions: m['liveCaptions'] ?? true,
+                speakingRequests: m['speakingRequests'] ?? false,
               ),
             );
           }
