@@ -174,4 +174,41 @@ void main() {
 
     controller.dispose();
   });
+
+  test('restores valid session history after an invalid record', () async {
+    final prefs = SharedPreferencesAsync();
+    await prefs.setString(
+      'sessions',
+      jsonEncode([
+        {
+          'id': 'VALID-HISTORY',
+          'name': 'Previous Meeting',
+          'feature': 'audio',
+          'method': 'wifi',
+          'role': 'host',
+          'status': 'ended',
+          'created': '2026-11-20T10:00:00.000Z',
+        },
+        {
+          'id': 'INVALID-HISTORY',
+          'feature': 'unknown_feature',
+        },
+      ]),
+    );
+
+    final controller = WaveController(InMemorySessionRepository());
+    await controller.restorePreferences();
+
+    expect(controller.getSession('INVALID-HISTORY'), isNull);
+    expect(controller.getSession('VALID-HISTORY')?.name, 'Previous Meeting');
+    expect(
+      controller.getSession('VALID-HISTORY')?.status,
+      SessionStatus.ended,
+    );
+    expect(controller.pastSessions, hasLength(1));
+
+    await controller.flush();
+    controller.dispose();
+  });
+
 }
