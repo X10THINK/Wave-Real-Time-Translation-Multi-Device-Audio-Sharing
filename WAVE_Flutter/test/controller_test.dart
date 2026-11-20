@@ -43,4 +43,56 @@ void main() {
     expect(s.participants, 0);
     state.dispose();
   });
+
+  test('repository updates sessions without duplicate IDs', () {
+    final repository = InMemorySessionRepository();
+
+    final original = WaveSession(
+      id: 'ROOM-101',
+      name: 'Test Room',
+      feature: WaveFeature.audio,
+      method: TransferMethod.wifi,
+      role: SessionRole.host,
+      status: SessionStatus.lobby,
+      createdAt: DateTime.utc(2026, 11, 20),
+    );
+
+    repository.put(original);
+    repository.put(
+      original.copyWith(
+        status: SessionStatus.live,
+        participants: 3,
+      ),
+    );
+
+    expect(repository.getAll(), hasLength(1));
+    expect(repository.findById('ROOM-101')?.status, SessionStatus.live);
+    expect(repository.findById('ROOM-101')?.participants, 3);
+    expect(repository.findById('UNKNOWN'), isNull);
+    expect(() => repository.getAll().clear(), throwsUnsupportedError);
+  });
+
+  test('ended sessions cannot return to live through status update', () async {
+    final controller = WaveController(InMemorySessionRepository());
+
+    final draft = SessionDraft(WaveFeature.audio)
+      ..roomName = 'Test Session'
+      ..method = TransferMethod.wifi;
+
+    final session = controller.createSession(
+      draft,
+      roomCode: 'ROOM-102',
+    );
+
+    controller.endSession(session.id);
+    controller.changeStatus(session.id, SessionStatus.live);
+
+    expect(controller.getSession(session.id)?.status, SessionStatus.ended);
+    expect(controller.activeFor(WaveFeature.audio), isNull);
+    expect(controller.pastSessions, hasLength(1));
+
+    await controller.flush();
+    controller.dispose();
+  });
+
 }
