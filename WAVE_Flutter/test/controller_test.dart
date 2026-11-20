@@ -189,10 +189,7 @@ void main() {
           'status': 'ended',
           'created': '2026-11-20T10:00:00.000Z',
         },
-        {
-          'id': 'INVALID-HISTORY',
-          'feature': 'unknown_feature',
-        },
+        {'id': 'INVALID-HISTORY', 'feature': 'unknown_feature'},
       ]),
     );
 
@@ -201,14 +198,10 @@ void main() {
 
     expect(controller.getSession('INVALID-HISTORY'), isNull);
     expect(controller.getSession('VALID-HISTORY')?.name, 'Previous Meeting');
-    expect(
-      controller.getSession('VALID-HISTORY')?.status,
-      SessionStatus.ended,
-    );
+    expect(controller.getSession('VALID-HISTORY')?.status, SessionStatus.ended);
     expect(controller.pastSessions, hasLength(1));
 
     await controller.flush();
     controller.dispose();
   });
-
 }

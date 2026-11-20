@@ -147,7 +147,9 @@ class WaveController extends ChangeNotifier {
                   maxParticipants: m['capacity'] ?? 10,
                   joinApproval: m['approval'] ?? false,
                   hostName: m['hostName'] ?? 'Host',
-                  audioSource: AudioSource.values.byName(m['source'] ?? 'music'),
+                  audioSource: AudioSource.values.byName(
+                    m['source'] ?? 'music',
+                  ),
                   targetLanguage: m['language'] ?? defaultLanguage,
                   sourceLanguage: m['sourceLanguage'] ?? 'English',
                   translatedVoice: m['translatedVoice'] ?? true,
