@@ -255,4 +255,34 @@ void main() {
     await controller.flush();
     controller.dispose();
   });
+  test('restores active history without a native bridge', () async {
+    final prefs = SharedPreferencesAsync();
+    await prefs.setString(
+      'sessions',
+      jsonEncode([
+        {
+          'id': 'OFFLINE-HISTORY-001',
+          'name': 'Offline History',
+          'feature': 'audio',
+          'method': 'wifi',
+          'role': 'host',
+          'status': 'live',
+          'created': '2026-11-20T10:00:00.000Z',
+        },
+      ]),
+    );
+
+    // Default observeNative:false must not start Android platform channels.
+    final controller = WaveController(InMemorySessionRepository());
+    await controller.restorePreferences();
+
+    expect(controller.getSession('OFFLINE-HISTORY-001')?.name, 'Offline History');
+    expect(controller.getSession('OFFLINE-HISTORY-001')?.status,
+        SessionStatus.live);
+
+    await controller.flush();
+    controller.dispose();
+  });
+
+
 }
