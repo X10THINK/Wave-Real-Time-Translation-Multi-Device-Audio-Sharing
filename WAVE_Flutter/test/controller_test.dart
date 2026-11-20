@@ -207,12 +207,8 @@ void main() {
 
   test('repeated state updates do not notify listeners', () async {
     final controller = WaveController(InMemorySessionRepository());
-    final draft = SessionDraft(WaveFeature.audio)
-      ..roomName = 'Lifecycle Test';
-    final session = controller.createSession(
-      draft,
-      roomCode: 'LIFECYCLE-101',
-    );
+    final draft = SessionDraft(WaveFeature.audio)..roomName = 'Lifecycle Test';
+    final session = controller.createSession(draft, roomCode: 'LIFECYCLE-101');
 
     var notifications = 0;
     controller.addListener(() => notifications++);
@@ -251,10 +247,7 @@ void main() {
       ..audioSource = AudioSource.music
       ..track = selectedTrack;
 
-    final session = controller.createSession(
-      draft,
-      roomCode: 'TRACK-101',
-    );
+    final session = controller.createSession(draft, roomCode: 'TRACK-101');
 
     expect(session.track, same(selectedTrack));
     expect(controller.getSession(session.id)?.track, same(selectedTrack));
@@ -262,5 +255,4 @@ void main() {
     await controller.flush();
     controller.dispose();
   });
-
 }
