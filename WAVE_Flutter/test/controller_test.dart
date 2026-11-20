@@ -161,8 +161,9 @@ void main() {
 
     final raw = await SharedPreferencesAsync().getString('sessions');
     expect(raw, isNotNull);
-    final saved =
-        (jsonDecode(raw!) as List<dynamic>).cast<Map<String, dynamic>>().single;
+    final saved = (jsonDecode(raw!) as List<dynamic>)
+        .cast<Map<String, dynamic>>()
+        .single;
 
     expect(saved['id'], 'HISTORY-001');
     expect(saved['language'], 'Tamil');
@@ -173,5 +174,4 @@ void main() {
 
     controller.dispose();
   });
-
 }
