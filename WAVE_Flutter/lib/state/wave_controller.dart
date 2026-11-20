@@ -165,30 +165,35 @@ class WaveController extends ChangeNotifier {
           debugPrint('Invalid saved history: $e');
         }
       }
-      await WaveNative.instance.refresh();
-      final n = WaveNative.instance;
-      if (n.running && getSession(n.currentRoom)?.isActive != true) {
-        final st = n.state;
-        repository.put(
-          WaveSession(
-            id: n.currentRoom,
-            name: st['sessionName']?.toString() ?? 'WAVE Room',
-            feature: n.currentFeature == 'translation'
-                ? WaveFeature.translation
-                : WaveFeature.audio,
-            method: TransferMethod.values.byName(n.currentMode),
-            role: n.hosting ? SessionRole.host : SessionRole.receiver,
-            status: SessionStatus.live,
-            createdAt: DateTime.fromMillisecondsSinceEpoch(
-              (st['startedAt'] as num?)?.toInt() ??
-                  DateTime.now().millisecondsSinceEpoch,
+      // Native reconciliation is only enabled for controllers observing the
+      // Android bridge. Detached controllers (including unit tests) restore
+      // stored metadata without creating platform channel subscriptions.
+      if (_observeNative) {
+        await WaveNative.instance.refresh();
+        final n = WaveNative.instance;
+        if (n.running && getSession(n.currentRoom)?.isActive != true) {
+          final st = n.state;
+          repository.put(
+            WaveSession(
+              id: n.currentRoom,
+              name: st['sessionName']?.toString() ?? 'WAVE Room',
+              feature: n.currentFeature == 'translation'
+                  ? WaveFeature.translation
+                  : WaveFeature.audio,
+              method: TransferMethod.values.byName(n.currentMode),
+              role: n.hosting ? SessionRole.host : SessionRole.receiver,
+              status: SessionStatus.live,
+              createdAt: DateTime.fromMillisecondsSinceEpoch(
+                (st['startedAt'] as num?)?.toInt() ??
+                    DateTime.now().millisecondsSinceEpoch,
+              ),
+              maxParticipants: (st['capacity'] as num?)?.toInt() ?? 10,
+              joinApproval: st['approval'] == true,
             ),
-            maxParticipants: (st['capacity'] as num?)?.toInt() ?? 10,
-            joinApproval: st['approval'] == true,
-          ),
-        );
+          );
+        }
+        _onNativeChanged();
       }
-      _onNativeChanged();
     } catch (e) {
       debugPrint('Restore: $e');
     } finally {
