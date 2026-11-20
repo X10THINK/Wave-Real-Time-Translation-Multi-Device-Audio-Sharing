@@ -95,4 +95,51 @@ void main() {
     controller.dispose();
   });
 
+
+  test('host session metadata preserves draft translation preferences', () async {
+    final controller = WaveController(InMemorySessionRepository());
+    final draft = SessionDraft(WaveFeature.translation)
+      ..roomName = 'Multilingual Discussion'
+      ..method = TransferMethod.wifi
+      ..sourceLanguage = 'Sinhala'
+      ..targetLanguage = 'English'
+      ..translatedVoice = false
+      ..liveCaptions = false
+      ..speakingRequests = true;
+
+    final session = controller.createSession(draft, roomCode: 'HOST-TEST');
+
+    expect(session.sourceLanguage, 'Sinhala');
+    expect(session.targetLanguage, 'English');
+    expect(session.translatedVoice, isFalse);
+    expect(session.liveCaptions, isFalse);
+    expect(session.speakingRequests, isTrue);
+
+    await controller.flush();
+    controller.dispose();
+  });
+
+  test('receiver session metadata preserves draft translation preferences', () async {
+    final controller = WaveController(InMemorySessionRepository());
+    final draft = SessionDraft(WaveFeature.translation)
+      ..roomCode = 'RECV-TEST'
+      ..method = TransferMethod.hotspot
+      ..sourceLanguage = 'Sinhala'
+      ..targetLanguage = 'English'
+      ..translatedVoice = false
+      ..liveCaptions = false
+      ..speakingRequests = true;
+
+    final session = controller.joinSession(draft);
+
+    expect(session.sourceLanguage, 'Sinhala');
+    expect(session.targetLanguage, 'English');
+    expect(session.translatedVoice, isFalse);
+    expect(session.liveCaptions, isFalse);
+    expect(session.speakingRequests, isTrue);
+
+    await controller.flush();
+    controller.dispose();
+  });
+
 }
