@@ -1,0 +1,621 @@
+# BT SHARE · Member 3 · MIC-only Flutter Translation POC
+
+**Branch:** `Sihan-Member-3` · **Owner:** Member 3 · **Scope:** `experiments/ai-translation/**`
+
+This is a **proof of concept**, not a shipping app. The Dart and Android implementation sources are committed; generated Flutter toolchain and Android template files must be bootstrapped on a machine with Flutter/Android SDK. The user reported successfully building a debug APK and testing the MOCK application on Redmi Note 9 Pro for 03:56 with no errors. No live C2 AI-provider test has yet been observed; Flutter build and device tooling are unavailable inside the assistant runtime.
+
+## Features and truth in UI
+
+- MIC ONLY, Tamil ↔ English, original transcript and translated caption history.
+- Captures PCM16 mono 16 kHz microphone chunks with runtime permission. No playback capture, no MEDIA input, no video capture.
+- `mock` demo is functional without cloud credentials, **but deliberately does not transcribe the user's words**. Every ~48,000 input PCM bytes trigger a pre-scripted fixture. All mock captions are labelled **MOCK**; device text-to-speech reading the fixture is **not cloud-generated model speech**.
+- `gateway` mode connects to the included experimental Python gateway in `gateway/`. It returns real transcripts, translated captions and WAV TTS when the server has valid OpenAI API access. Supports translated audio returned as encoded WAV/MP3 and captions.
+- UI includes a duration timer, latency only when supplied as a measured gateway value, permission/error/retry states, voice/captions settings and accessible button labels.
+- AI session state and local original-audio link are independent. **This isolated module does not implement or prove local room audio distribution.**
+
+## Windows setup (Windows PowerShell)
+
+Requirements: current Flutter stable, Dart, Android Studio SDK/toolchain, at least Android API 23. At minimum:
+
+```powershell
+flutter doctor -v
+git clone https://github.com/mhdmusaddiq/BT-SHARE.git
+cd BT-SHARE
+git fetch --all
+git switch Sihan-Member-3
+git pull --ff-only origin Sihan-Member-3
+cd experiments/ai-translation
+# Generate missing standard Flutter Android/Gradle scaffolding.
+# The source-controlled manifest and Dart files must remain unchanged.
+flutter create --platforms=android --org com.btshare --project-name bt_share_ai_translation_poc .
+git diff -- android/app/src/main/AndroidManifest.xml
+flutter pub get
+dart format --output=write lib test
+flutter analyze
+flutter test
+flutter run --dart-define=BT_AI_PROVIDER=mock
+flutter build apk --debug --dart-define=BT_AI_PROVIDER=mock
+```
+
+`flutter create` may generate a default Android manifest and Gradle files. **Reapply the tracked `android/app/src/main/AndroidManifest.xml`** if it changes, then check it contains `RECORD_AUDIO`, `INTERNET` and the TTS query. Verify `git status` before committing generated output. The Android template must have `minSdk >= 23` and the installed Flutter Gradle and Kotlin plugin versions (avoid hardcoding deprecated Gradle settings). Flutter-generated Android scaffold files should be reviewed and committed by Member 3 after a successful local build.
+
+If an Android build reports unsupported `record`/permission/TTS platform API or missing permissions, treat as a build blocker, do not report it as tested.
+
+## Real gateway mode
+
+**Wire messages implemented by the experimental local gateway; production auth is NOT included:**
+
+Connect to `wss://...` using a short-lived, authenticated gateway session. Initial text JSON:
+```json
+{"type":"start","source_mode":"MIC","source_language":"ta","target_language":"en","format":"pcm_s16le","sample_rate_hz":16000,"channels":1,"ephemeral_session_token":"..."}
+```
+Client audio frames:
+```json
+{"type":"audio","source_mode":"MIC","sequence":1,"pcm16_base64":"..."}
+```
+Gateway text response:
+```json
+{"type":"segment","segment_id":"s1","original_text":"...","translated_text":"...","latency_ms":820,"audio_mime_type":"audio/wav","translated_audio_base64":"..."}
+```
+Or error:
+```json
+{"type":"error","message":"Service not available"}
+```
+
+This protocol is **provisional**: no central contract or other member module has been modified. Audio is sent ONLY after explicit MIC permission and translation start. Prefer binary audio frames, authenticated session refresh and server-side VAD before production. The gateway rejects MEDIA and includes a test-only token, basic rate bounds and cloud STT/translation/TTS. Production authentication, consent records, stronger limits and retention policies are still required.
+
+Local development example:
+```powershell
+flutter run --dart-define=BT_AI_PROVIDER=gateway --dart-define=BT_AI_WS_URL=ws://10.0.2.2:8080/v1/stream
+```
+Use `wss://` outside localhost. **Never hardcode provider API credentials or long-lived tokens in `--dart-define`: build-time flags are recoverable from app binaries.** The optional `BT_AI_SESSION_TOKEN` is suitable only for throwaway/local development ephemeral sessions. Production needs a gateway-issued short-lived scoped token via a secure authentication flow.
+
+## Layout
+
+```
+lib/
+  main.dart                       app wiring and provider selection
+  translation/
+    models.dart                   enums, segment and mode
+    microphone_input.dart         runtime microphone permission and PCM stream
+    translation_provider.dart     provider abstraction + labelled fixture
+    gateway_provider.dart         provisional WebSocket gateway adapter
+    voice_output.dart             fixture device TTS or received WAV/MP3 audio
+    session_controller.dart       lifecycle, timer, captions, retry, errors
+  ui/
+    translation_home.dart         responsive home/session, settings, captions
+test/
+  translation_provider_test.dart  mock direction and truth labels
+  session_controller_test.dart    permission, start/stop, AI failure isolation
+  widget_test.dart                visible MIC/MOCK controls, UI start/stop
+android/app/src/main/AndroidManifest.xml    permission and TTS-query additions
+```
+
+## Privacy and limitations
+
+- **Mock microphone data is counted, not recognized or stored.** No audio bytes or speech content are logged.
+- Gateway mode streams user microphone data to the configured remote endpoint. Obtain participant consent and configure backend deletion/encryption and retention before real use.
+- No foreground service or background capture yet; the app is for foreground testing.
+- No cross-device sync, host-transfer, room networking, local-original-audio transport or model inference engine here.
+- No VAD, jitter estimation, network QoS measurement, production audio feedback/echo control or continuous speech segmentation guaranteed.
+- A Python OpenAI gateway implementation is included, but live translation, latency, Tamil speech quality and model TTS are **not verified**.
+- Device TTS availability varies for Tamil. When it is missing, playback error should be shown.
+- Sample fixture every 1.5 seconds is a **test harness**, never a model accuracy benchmark.
+- Do not persist, upload or commit recordings, transcripts or identifiers without consent and redaction.
+
+## Test plan / honest evidence
+
+Run `dart format --output=write lib test`, `flutter analyze`, `flutter test` and `flutter build apk --debug` on a configured Android workstation, capturing output with secrets and content redacted. Then test on consented Android phone(s):
+
+1. C1: permission allow/deny/revoke, 1–2 min MIC capture and chunk throughput; check switching app/background appropriately stops recording.
+2. C2: original caption, translated caption and audible generated voice through a **real** provider; measure per-segment original and playback times.
+3. C3: 5 minutes with speech/silence, service disconnect and retry, count dropped segments.
+4. C4: Tamil→English and English→Tamil real utterances, record translation errors without storing raw private utterances.
+5. C5: API/Wi-Fi outage with independent original-local-audio stream installed by the integration owner. Without a working local-stream harness, independence is only unit-level, not hardware proof.
+
+Evidence C0–C5 lives at `../../evidence/ai-translation/`. C1 has user-reported 03:56 MIC capture in MOCK mode; C2 real provider output remains NOT_VERIFIED.
+
+## Contribution policy
+
+Work only on `Sihan-Member-3` and these two owned paths. Verify active branch and diff; never push to `development` or `main`; do not open/merge a PR without explicit request. Real integration must be reviewed by central coordinator.
+
+## C2 — OpenAI API Gateway (restored 2026-11-14)
+
+The user selected **OpenAI API** after a temporary Google Gemini migration.
+The active implementation uses three sequential calls per spoken utterance:
+
+1. `gpt-transcribe` file transcription using a short microphone WAV segment
+2. `gpt-4.1-mini` Tamil ↔ English text translation
+3. `gpt-4o-mini-tts` spoken translation returned as WAV audio
+
+OpenAI credentials live on the **Python gateway only**. Flutter UI, microphone,
+consent, PCM frame format, `/v1/stream`, segment JSON and WAV playback are
+unchanged. The Gemini-only module and fake API tests were removed; the original
+OpenAI mocked-contract test was restored.
+
+**Important model lifecycle:** `gpt-4o-mini-tts` is scheduled to shut down
+2027-01-06 and `gpt-4.1-mini` 2027-01-14. This existing segmented proof of
+concept is usable before those dates if model access/quota permit. Upgrade
+later to a compatible supported future workflow; do not substitute a Realtime
+model ID directly into `/audio/speech`. This implementation is **not**
+simultaneous low-latency interpretation; it waits about 0.5s after speech.
+
+### Restart on Windows after GitHub update
+
+In the existing Python server terminal, press **Ctrl+C** to stop the old server.
+
+**Terminal 1 — Python gateway (PowerShell):**
+```powershell
+cd "G:\BT-Share\BT-SHARE\BT-SHARE\experiments\ai-translation"
+git status --short
+git pull --ff-only origin Sihan-Member-3
+& "G:\BT-Share\.venv\Scripts\Activate.ps1"
+python -m pip install -r .\gateway\requirements.txt
+python -m pytest gateway -q
+
+# Reuse SAME local Flutter dev token; do not rotate it accidentally.
+$config = Get-Content .\local_gateway.json -Raw | ConvertFrom-Json
+$env:BT_DEV_GATEWAY_TOKEN = $config.BT_AI_SESSION_TOKEN
+
+# Read OpenAI API key privately; do NOT print or paste it into chat.
+$key = Read-Host "Enter OpenAI API key" -AsSecureString
+$env:OPENAI_API_KEY = [System.Net.NetworkCredential]::new("", $key).Password
+Remove-Variable key -ErrorAction SilentlyContinue
+Remove-Item Env:GEMINI_API_KEY -ErrorAction SilentlyContinue
+
+python -m uvicorn gateway.app:app --host 0.0.0.0 --port 8098
+```
+
+**Terminal 2 — Android Flutter app:**
+```powershell
+cd "G:\BT-Share\BT-SHARE\BT-SHARE\experiments\ai-translation"
+Invoke-RestMethod http://127.0.0.1:8098/health/live
+flutter analyze
+flutter test
+flutter devices
+powershell -ExecutionPolicy Bypass -File .\scripts\enable_debug_lan_ws.ps1
+flutter run -d f7d152a --dart-define-from-file=local_gateway.json
+```
+
+Replace `f7d152a` if `flutter devices` shows a different ID. Test your
+Redmi Note 9 Pro on the same trusted mobile hotspot. If the host's IP is still
+`10.198.218.82`, the existing local `BT_AI_WS_URL` may stay
+`ws://10.198.218.82:8098/v1/stream`; if changed, update just that URL and
+rebuild the debug app. The temporary token is stored in ignored
+`local_gateway.json` and must match the gateway's `BT_DEV_GATEWAY_TOKEN`.
+Never embed `OPENAI_API_KEY` in Flutter files, Git or dart-defines.
+
+This debug setup uses plain `ws://` over private LAN and a shared temporary
+token; **not production-secure**. Restrict Windows Firewall to local testing.
+Never open the service to the internet.
+
+### C2 on-phone verification
+
+1. Consent to cloud microphone processing, select Tamil → English, press Start.
+2. Speak a short Tamil sentence, pause at least 0.5 seconds.
+3. Check **original Tamil transcript**, **English translated text** and tap
+   speaker to confirm the generated WAV voice is audible.
+4. Stop, change to English → Tamil and verify Tamil text and voice.
+5. Stop and confirm the Android microphone usage indicator disappears.
+6. Record actual errors and latency without logging private speech.
+7. `/health/live` only proves process liveness, not valid OpenAI billing or
+   model quota. An authenticated cloud call is still required for C2 PASS.
+
+Run `python -m pytest gateway -q` after the provider switch. Earlier 7
+Python and 7 Flutter tests passed in user-reported Windows logs for
+the original implementation; no new local run or real API request has
+been performed by the assistant in this change.
+
+**API billing is separate from ChatGPT subscription billing.**
+Check API account credits and model access:
+https://platform.openai.com/settings/organization/billing/overview
+
+References:
+- https://developers.openai.com/api/docs/guides/speech-to-text
+- https://developers.openai.com/api/docs/guides/text-to-speech
+- https://developers.openai.com/api/docs/deprecations
+
+## C2 Fast Mode — staged low-latency output (2026-11-14)
+
+**Opt-in rollback without Flutter rebuild:** new Python gateway defaults to
+`BT_AI_LATENCY_MODE=fast`. To revert to the previous known-working user
+experience, set `BT_AI_LATENCY_MODE=stable` in the **same PowerShell terminal**
+**before starting** Uvicorn. Restarting the gateway is required. The
+Flutter `local_gateway.json` endpoint, dev token, consent and keys are unchanged.
+
+```powershell
+# First stop old Python server using Ctrl+C in its terminal.
+cd "G:\BT-Share\BT-SHARE\BT-SHARE\experiments\ai-translation"
+git status --short
+git pull --ff-only origin Sihan-Member-3
+& "G:\BT-Share\.venv\Scripts\python.exe" -m pytest gateway -q
+
+# In server terminal: load the existing token and OpenAI key (secret input).
+$config = Get-Content .\local_gateway.json -Raw | ConvertFrom-Json
+$env:BT_DEV_GATEWAY_TOKEN = $config.BT_AI_SESSION_TOKEN
+$env:BT_AI_LATENCY_MODE = "fast"
+$secret = Read-Host "Enter OpenAI API key" -AsSecureString
+$env:OPENAI_API_KEY = [System.Net.NetworkCredential]::new("", $secret).Password
+Remove-Variable secret -ErrorAction SilentlyContinue
+
+& "G:\BT-Share\.venv\Scripts\python.exe" -m uvicorn gateway.app:app --host 0.0.0.0 --port 8098
+```
+
+The original stable architecture waited **five** 100ms PCM frames of silence
+(~500ms) before processing. Fast mode needs **three** silent frames (~300ms).
+The 0.8s minimum utterance and 5s maximum segmentation remain unchanged.
+Shorter pause detection can split speech on natural pauses, so compare Tamil
+phrases and accents before production rollout. These values are algorithmic,
+**not actual measured wall-clock latency improvements**.
+
+Fast mode also sends the first translated subtitle immediately after
+transcription+translation completes, **before** TTS returns. Later it updates
+the **same** `segment_id` with the generated WAV audio. Flutter's existing
+controller merges the two messages without duplicate captions and will only
+auto-speak on the audio-bearing final event. In stable mode the server retains
+a single caption+audio event after all three API calls, as before.
+
+Each completed segment includes optional `stage_timings_ms` values for
+`stt`, `translation` and `tts` (gateway processing only) plus existing
+`latency_ms` (server stage total). The Android UI currently displays only
+the server latency; it is **not** speech-end-to-first-audio latency. Neither
+voice nor text contents are logged or saved by this gateway.
+
+### Verify without losing existing working setup
+
+1. Run `python -m pytest gateway -q`, `flutter analyze`, `flutter test`
+   before the physical trial; new tests exercise both modes and incremental
+   captions. Old baseline had user-reported 7 Python tests, 7 Flutter tests;
+   those results do **not** cover this change.
+2. Restart Python Gateway. Change only `BT_AI_LATENCY_MODE` to select mode.
+3. Current phone hotspot IPv4 may differ from previously reported
+   `10.160.198.82`. Verify `ipconfig` and `local_gateway.json` match.
+4. Fresh `flutter run -d <DEVICE_ID> --dart-define-from-file=local_gateway.json`
+   after pulling the added Flutter test (Flutter runtime source is unchanged).
+5. Consent to cloud MIC processing. Speak 10 short Tamil and 10 English
+   phrases, then compare the time until captions first appear and when WAV
+   voice plays, as well as translation accuracy and dropped phrases.
+6. Check start/retry, language swap, microphone stop/privacy icon, settings,
+   user playback, backgrounding, hotspot disconnect, reconnection, and
+   at least a 5-minute continuous session with intentional pauses.
+7. If speech is cut on short pauses or errors increase, revert:
+   `$env:BT_AI_LATENCY_MODE = "stable"` and restart Uvicorn.
+
+**Known limitations:** unchanged three sequential OpenAI requests mean
+audio response latency still depends on the full TTS call. Fast mode makes
+first captions visible earlier and reduces end-of-utterance silence buffering,
+but cannot deliver zero-latency voice. Full duplex true continuous streaming,
+echo cancellation under auto-speak, durable retries and production security
+are separate milestones. Never claim production readiness without physical
+tests, and never commit `OPENAI_API_KEY` or a local gateway token.
+
+Documentation:
+- https://developers.openai.com/api/docs/guides/latency-optimization
+- https://developers.openai.com/api/docs/guides/text-to-speech
+- https://developers.openai.com/api/docs/guides/realtime-translation
+
+## Android AI voice playback improvement (2026-11-14)
+
+- Fast Mode delivers text before generated audio. The caption speaker button is
+  now disabled and displays **Generating AI voice…** until audio bytes for that
+  segment arrive. The Voice Output card also indicates when the latest speech
+  is pending; it does not silently fail if text is ready before TTS.
+- The Flutter controller resolves the freshest segment by ID before playback.
+  It now reports a playback warning if manual play is attempted before audio
+  exists or if Android media playback throws an exception.
+- Android playback requests the speaker/media route and full player volume
+  while recording, reducing confusion with the earpiece route. Headphones are
+  recommended to prevent translated speech from being re-recorded.
+- New Python Gateway defaults to **MP3** generated voice, supported by the
+  existing Flutter audio MIME handler. MP3 uses lower WebSocket bandwidth and
+  is broadly decoded by Android; this does not prove it resolves every device
+  playback issue. To use original WAV: `$env:BT_AI_TTS_FORMAT = "wav"`
+  **before starting** Uvicorn. Stop/restart the server when changing mode.
+- Under **Settings → Translated voice output**, turn ON, then enable
+  **Speak automatically** if voice should play without tapping. This setting
+  remains OFF by default to prevent microphone/audio feedback. Without it the
+  user must tap the speaker icon after **voice ready**.
+- Tests were added for early caption/no audio, later audio with same ID,
+  MP3 contract, WAV rollback. The project maintainer must run
+  `python -m pytest gateway -q`, `flutter analyze`, `flutter test`,
+  and check on a physical Redmi Note 9 Pro. The GitHub edit is not equivalent
+  to a successful device test. No OpenAI key is stored in app or git.
+
+## C3 Phase 1 · Continuous live captions (opt-in, 2026-11-15)
+
+**Goal:** Tamil ↔ English subtitles update **as speech arrives**, instead of
+waiting for a silence break and three sequential cloud API requests. This is
+a separate **Realtime Caption Mode** with dedicated OpenAI translation
+session, not a speed claim for the existing segmented implementation.
+
+### Mode selection and rollback
+
+The old segmented translator **remains the default** and retains its
+existing generated MP3/WAV voice and speaker button.
+
+In the Python Gateway terminal choose:
+
+```powershell
+# Run once after pulling updated code:
+& "G:\BT-Share\.venv\Scripts\python.exe" -m pip install -r gateway/requirements.txt
+
+# Choose live caption-only (no streaming voice yet):
+$env:BT_AI_CAPTION_ENGINE = "realtime"
+
+# Or revert to the old fully working segmented translator and voice:
+$env:BT_AI_CAPTION_ENGINE = "segmented"
+```
+
+The setting is read at the start of each mobile session; restart Uvicorn
+after changing the variable for clarity. Keep `BT_DEV_GATEWAY_TOKEN` and
+`OPENAI_API_KEY` in the **Python server terminal only**, loaded exactly as
+for the previous C2 build; never paste or commit them. Client
+`local_gateway.json` uses the **same** existing `/v1/stream` endpoint,
+`BT_AI_PROVIDER=gateway`, same token, and cloud microphone consent.
+
+With `BT_AI_CAPTION_ENGINE=realtime`, gateway uses
+`wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate`
+after authenticating the phone. Its original 16 kHz mono MIC PCM is
+resampled with the existing stateful `Pcm16To24` into 24 kHz mono PCM16 and
+sent in 200 ms frames continuously, **including silence**. The OpenAI API
+returns append-only `session.input_transcript.delta` and
+`session.output_transcript.delta` events; the gateway coalesces bursts
+into at most about 12.5 UI updates per second, sends snapshots under stable
+ID `live-current`, and bounds each running caption to the last 1400 chars.
+Both languages' captions may arrive at different moments. Do not insert
+spaces or assume perfect word/sentence alignment between deltas.
+
+The Flutter screen shows a **LIVE** indicator. The speaker button stays
+disabled with an explicit **Live captions only** message. Generated
+translated PCM deltas are **discarded in Phase 1**; processing/model charges
+may still apply. Phase 2 will implement synchronized buffered streaming
+voice playback with proper microphone echo protection. Do not confuse
+caption-only mode with failed TTS playback.
+
+### Test, measure, and fallback
+
+```powershell
+cd "G:\BT-Share\BT-SHARE\BT-SHARE\experiments\ai-translation"
+git status --short
+git pull --ff-only origin Sihan-Member-3
+& "G:\BT-Share\.venv\Scripts\python.exe" -m pip install -r gateway/requirements.txt
+& "G:\BT-Share\.venv\Scripts\python.exe" -m pytest gateway -q
+flutter analyze
+flutter test
+```
+
+If the updated Python tests or Flutter tests fail, fix failures before
+turning on live mode. Stop Uvicorn with Ctrl+C; reload the existing
+BT_DEV_GATEWAY_TOKEN and OPENAI_API_KEY if starting a **new** terminal.
+Then set `$env:BT_AI_CAPTION_ENGINE="realtime"` and run:
+
+```powershell
+& "G:\BT-Share\.venv\Scripts\python.exe" -m uvicorn gateway.app:app --host 0.0.0.0 --port 8098
+```
+
+Keep hotspot IPv4 and `local_gateway.json` WebSocket URL in sync,
+`flutter run -d f7d152a --dart-define-from-file=local_gateway.json`.
+Speak continuously for 15–30 seconds, without an intentional pause:
+translated text should **begin changing while speech is ongoing**.
+Test Tamil → English and English → Tamil, number preservation, 5-minute
+continuity, microphone Stop, consent, token rejection, hotspot loss and
+Retry. Distinguish **first source text**, **first translated text** and
+**voice** times; realtime captions have no voice in this phase.
+
+Rollback if Realtime model access is unavailable or transcript quality is
+worse: `$env:BT_AI_CAPTION_ENGINE="segmented"`, restart Uvicorn, then Retry
+on Android. It restores prior STT → translation → TTS and full voice
+without a Flutter rebuild.
+
+**Not yet confirmed:** local Python/Flutter tests for the new branch,
+OpenAI production entitlement/quotas, device timings, Tamil quality and
+continuous phone operation. A 200ms engine audio frame is **not** a 200ms
+guarantee for first translated words. True latency depends on speech content,
+network, model processing, device rendering and quality/accuracy tradeoffs.
+
+Source: https://developers.openai.com/api/docs/guides/realtime-translation
+
+## C3 Phase 2 · Live translated voice (opt-in; 2026-11-15)
+
+**New mode:** Realtime Translate now optionally forwards OpenAI
+`session.output_audio.delta` PCM16 (24kHz mono) to Flutter using bounded,
+sequence-checked `audio_delta` events. Flutter uses
+`audio_stream_player: ^1.1.0` (native Android AudioTrack on Redmi Note 9 Pro)
+to feed PCM as it arrives; it does **not** wait for full MP3/WAV.
+A distinct realtime transcript segment `live-current` keeps updating
+alongside the audio stream. Audio is **not** saved or available for replay
+from the caption speaker icon.
+
+**Safe defaults:** `BT_AI_CAPTION_ENGINE=segmented` is the old working
+gateway and its full-file generated TTS remains unchanged.
+`BT_AI_CAPTION_ENGINE=realtime` and `BT_AI_REALTIME_VOICE=0` is
+the user-verified continuous caption-only mode. Realtime voice must
+be explicitly enabled by setting both variables in the Python gateway
+terminal **before Uvicorn starts**:
+
+```powershell
+$env:BT_AI_CAPTION_ENGINE = "realtime"
+$env:BT_AI_REALTIME_VOICE = "1"
+```
+
+Keep the existing `OPENAI_API_KEY` and `BT_DEV_GATEWAY_TOKEN` in the
+server process environment, not GitHub or the Flutter app.
+Run `pip install -r gateway/requirements.txt`, `flutter pub get`,
+`python -m pytest gateway -q`, `flutter analyze`, and
+`flutter test` before device testing. Then restart Uvicorn and rebuild
+the app with `flutter run -d f7d152a --dart-define-from-file=local_gateway.json`.
+
+To **hear** the realtime translation, open the app **Settings** and set
+**Translated voice output = ON**, **Speak automatically = ON**.
+The default auto-speak is OFF intentionally; user should prefer wired or
+Bluetooth headphones, to prevent AI voice from feeding back into mic
+despite the existing microphone echoCancel/noiseSuppress flags. Some
+Android devices suppress recording/playback when sharing audio focus;
+real-world concurrent MIC + speaker tests are required.
+
+Bounded delivery: server splits provider deltas into <=9600-byte frames
+and rejects invalid PCM. Flutter validates continuous sequence and audio
+metadata and has a 120KB (2.5s) pending Dart work limit. The native
+streaming player checks buffered duration (2s); if playback falls behind
+it reports a device playback error and stops voice, not the microphone
+session. Stop/retry/mute cancels the subscription, drains async tasks
+and disposes the audio sink. No translated audio is persisted.
+
+**Rollback without app rebuild:** set
+`BT_AI_REALTIME_VOICE=0` and restart gateway for Phase 1 captions.
+Or select `BT_AI_CAPTION_ENGINE=segmented` for original full voice
+with manual speaker replay. No changes to MIC-only permissions,
+auth token flow, or local-room audio connection.
+
+**Not yet verified:** Flutter/Dart compilation and Python regression
+tests must run in the Windows environment; live bilingual 5-minute
+translation, output timing, echo and jitter are unmeasured until user
+reports device results. This code is an opt-in POC, not production ready.
+
+References:
+- https://developers.openai.com/api/docs/guides/realtime-translation
+- https://developers.openai.com/api/reference/resources/realtime/translation-server-events
+- https://pub.dev/packages/audio_stream_player
+
+## Windows Android Gradle JVM target fix (2026-11-15)
+
+The Flutter `audio_stream_player: 1.1.0` Android plugin targets **Java 17**
+in its own `android/build.gradle.kts`. Some Flutter toolchains run with
+JDK 21 and Kotlin produces JVM 21 bytecode; Gradle then rejects the
+inconsistent pair: `compileDebugJavaWithJavac (17)` vs
+`compileDebugKotlin (21)`.
+
+**Recommended remedy:** select a verified local JDK 17 for Flutter, rather
+than suppressing Kotlin target validation, editing Gradle Pub Cache files,
+changing Android minimum SDK or modifying generated Android resources.
+
+```powershell
+cd "G:\BT-Share\BT-SHARE\BT-SHARE\experiments\ai-translation"
+git pull --ff-only origin Sihan-Member-3
+powershell -ExecutionPolicy Bypass -File .\scripts\use_flutter_jdk17.ps1
+flutter clean
+flutter pub get
+flutter run -d f7d152a --dart-define-from-file=local_gateway.json
+```
+
+If the script reports that no JDK 17 is installed:
+`winget install -e --id EclipseAdoptium.Temurin.17.JDK` and rerun it.
+Use `-JdkPath "C:\path\to\jdk-17"` if installed somewhere unusual.
+The script **checks** `bin/java.exe` and `bin/javac.exe`, verifies that
+`java -version` reports major version 17, and calls
+`flutter config --jdk-dir` only when it has a good path. It never edits
+a generated Gradle build file, package cache or secrets.
+
+**Important:** `flutter config --jdk-dir` affects **all local Flutter
+projects**. Users with projects requiring JDK 21 should record their
+previous Flutter JDK path (`flutter doctor -v`) and set it back later
+using `flutter config --jdk-dir="C:\previous\jdk\path"`.
+
+The `flutter_tts` Kotlin Gradle Plugin deprecation warning is separate
+from this `audio_stream_player` JVM-target build failure.
+
+Sources:
+- https://kotlinlang.org/docs/gradle-configure-project.html#check-for-jvm-target-compatibility-of-related-compile-tasks
+- https://developer.android.com/build/jdks
+- https://github.com/adrianczuczka/audio_stream_player/blob/v1.1.0/android/build.gradle.kts
+
+## C3 Phase 2.1 · Stuttering/jitter-buffer fix (2026-11-15)
+
+A Redmi Note 9 Pro user confirmed live captions WORKING, streaming AI voice
+WORKING, voice delay 1–3 sec, but speech was breaking/stuttering.
+The live player previously called `play()` immediately after creating the
+native AudioTrack and before buffering any PCM. This can cause playback
+underruns when output PCM comes in bursts over the hotspot.
+
+A **small configurable startup jitter buffer** is now opt-in by source
+update (default 320 ms, hard-clamped to 100–750 ms). PCM is fed to
+AudioStreamPlayer before calling `play()`; a 600-ms max-wait fallback
+(clamped 200–1200 ms) starts audio even if a short utterance never fills
+the target. Playback source, microphone and live subtitles are unchanged.
+Actual underruns are counted via `onUnderrun` and reported in **debug**
+logs as `BT SHARE realtime audio underrun: #<count>` (no speech content).
+The existing 2-second native buffer cap and Dart queued-byte limit remain.
+
+**A/B test** startup buffering at default and 500 ms:
+```powershell
+flutter run -d f7d152a --dart-define-from-file=local_gateway.json
+# If still choppy, rerun with:
+flutter run -d f7d152a --dart-define-from-file=local_gateway.json --dart-define=BT_LIVE_VOICE_PREBUFFER_MS=500
+```
+Do not apply both runs simultaneously. Use the same 20–30-second spoken
+passage and headset/hotspot, compare gaps, first-voice delay and
+`BT SHARE realtime audio underrun` count in the Flutter debug console.
+The max-wait timer prevents silence for short translated segments; this
+is a mitigation rather than an assertion that network jitter caused
+the reported stutter.
+
+**Next if underruns persist:** add in-session adaptive rebuffer (with
+latency ceiling), inspect 200-ms frame delivery jitter and native
+AudioTrack scheduling, and switch to binary WS frames after benchmarking.
+Do not lower buffering to zero or claim sub-second latency before
+observing on-device p50/p95 first voice measurements.
+
+**Status:** code committed, Android physical test pending. This fix
+does not alter `BT_AI_CAPTION_ENGINE` or `BT_AI_REALTIME_VOICE` flags.
+If voice worsens, return to previous commit or run
+`BT_AI_REALTIME_VOICE=0` for live caption-only fallback.
+
+Player guide: https://pub.dev/packages/audio_stream_player/versions/1.1.0
+
+## C3 Phase 2.2 — Audio timing diagnostics (2026-11-15)
+
+Opt-in gateway metrics and Flutter debug timings are documented in
+[Phase 2.2 Diagnostics](docs/phase_2_2_diagnostics.md). This feature
+instruments the current streaming pipeline; it is not a fixed-voice or
+low-latency architecture change. Android test is pending.
+
+## Phase 2.3 — Audio continuity and provider caption gap (2026-11-15)
+
+User-reported real gateway logs show first provider audio arrived around
+0.7s after first audio send while target caption deltas arrived 2.5–4.7s
+later. Opt-in per-stream adaptive startup buffering and debug-only MIC
+pause/resume counts were added without changing caption/audio processing.
+See [Phase 2.3 Audio Continuity](docs/phase_2_3_audio_continuity.md).
+
+## Phase 2.3.4 — Audio delay decomposition
+
+Opt-in realtime audio queue reporting and phone PCM arrival-gap diagnostics
+are documented in [Phase 2.3.4 Audio Queue Diagnostics](docs/phase_2_3_4_audio_queue_diagnostics.md).
+This update measures queued output speech; it does not yet change model voice
+identity, inference latency or Android playback buffering behavior.
+
+## Phase 2.3.5 — 100ms PCM continuity A/B test
+
+A reversible 100ms vs 200ms PCM relay-frame experiment is described in
+[Phase 2.3.5 Continuity Test](docs/phase_2_3_5_audio_continuity_test.md).
+Use a fixed 500ms Flutter startup buffer for controlled real-device testing.
+This is a playback experiment, not a fixed-voice translation engine.
+
+## Phase 2.4 — Caption → Fixed Voice TTS (experimental)
+
+Selectable in Flutter Settings before starting translation: Direct AI Voice
+(default) or Caption → Fixed Voice TTS. The opt-in mode requires
+`BT_AI_CAPTION_TTS_ENABLED=1` on the Python gateway and uses an
+additional paid OpenAI Speech API request per stable caption phrase.
+The existing MIC-only realtime captions remain unchanged, and TTS never
+mixes provider-generated direct audio with caption-driven PCM.
+
+See [Phase 2.4 Caption-to-TTS Setup](docs/phase_2_4_caption_to_tts.md)
+for the detailed architecture, setup, rollback and A/B test plan.
+
+## Phase 2.5 — Voice-only TTS prefetch (frozen captions preserved)
+
+Caption-to-Fixed-Voice TTS now overlaps synthesis of the next phrase with
+playback of the current phrase. Up to two TTS requests can run concurrently
+while PCM packets are sent in original phrase order. The voice mode remains
+opt-in, and Direct AI Voice remains unchanged. No frozen original/translated
+caption components were edited.
+
+Set `BT_AI_TTS_PREFETCH_PARALLEL=2` on the Python server (default).
+For serial rollback / A-B testing set `BT_AI_TTS_PREFETCH_PARALLEL=1` and
+restart Uvicorn. Running two concurrent TTS requests may increase pressure
+on the Speech API rate limit; this feature does not guarantee a particular
+latency or uninterrupted Android playback.
+
+See [Phase 2.5 voice prefetch](docs/phase_2_5_tts_prefetch.md) and the
+[Frozen caption contract](docs/CAPTION_BASELINE_FROZEN.md).
