@@ -1,0 +1,298 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+import 'models.dart';
+import 'translation_provider.dart';
+
+/// BT SHARE MIC-only segmented translation adapter. Vendor credentials
+/// remain on the gateway server, never inside the Flutter application.
+class GatewayTranslationProvider
+    implements TranslationProvider, StreamingTranslationProvider,
+        GatewayAudioPacingInfo, GatewayAudioQueueInfo,
+        GatewayVoiceEngineSelection {
+  GatewayTranslationProvider({
+    required this.endpoint,
+    this.ephemeralSessionToken = '',
+    this.allowInsecureDevLan = false,
+  });
+
+  final Uri endpoint;
+  final String ephemeralSessionToken;
+  final bool allowInsecureDevLan;
+
+  final StreamController<TranslationSegment> _events =
+      StreamController<TranslationSegment>.broadcast();
+  final StreamController<Uint8List> _audio =
+      StreamController<Uint8List>.broadcast();
+  final StreamController<GatewayAudioQueueSnapshot> _audioQueue =
+      StreamController<GatewayAudioQueueSnapshot>.broadcast();
+
+  @override
+  Stream<GatewayAudioQueueSnapshot> get audioQueueMetrics => _audioQueue.stream;
+  WebSocketChannel? _channel;
+  StreamSubscription<dynamic>? _subscription;
+  bool _connected = false;
+  Completer<void>? _handshake;
+  int _sequence = 0;
+  bool _captionOnly = false;
+  bool _streamingAudio = false;
+  String _voiceEngine = 'direct';
+  bool? _outputAudioPaced;
+
+  @override
+  void selectVoiceEngine(String engine) {
+    if (engine != 'direct' && engine != 'caption_tts') {
+      throw ArgumentError.value(engine, 'engine', 'Unsupported voice engine');
+    }
+    if (_connected) throw StateError('Voice mode is locked during a session');
+    _voiceEngine = engine;
+  }
+  int _audioSequence = 0;
+
+  @override
+  bool? get outputAudioPaced => _outputAudioPaced;
+
+  @override
+  bool get supportsStreamingAudio => _streamingAudio;
+
+  @override
+  Stream<Uint8List> get translatedPcmChunks => _audio.stream;
+
+  @override
+  bool get isMock => false;
+
+  @override
+  Stream<TranslationSegment> get segments => _events.stream;
+
+  @override
+  Future<void> connect({
+    required TranslationLanguage source,
+    required TranslationLanguage target,
+  }) async {
+    if (_events.isClosed) {
+      throw const TranslationProviderFailure('Gateway provider is closed.');
+    }
+    if (source == target) {
+      throw const TranslationProviderFailure('Source and target must differ.');
+    }
+    final host = endpoint.host;
+    final localDevelopment = host == 'localhost' ||
+        host == '127.0.0.1' ||
+        host == '10.0.2.2' ||
+        host.startsWith('192.168.') ||
+        host.startsWith('10.') ||
+        RegExp(r'^172\.(1[6-9]|2[0-9]|3[01])\.').hasMatch(host);
+    final unsafeDevConnection =
+        kDebugMode && allowInsecureDevLan && localDevelopment;
+    if (endpoint.scheme != 'wss' &&
+        !(endpoint.scheme == 'ws' && unsafeDevConnection)) {
+      throw const TranslationProviderFailure(
+        'Use wss:// or explicitly enable debug-only private-LAN ws://.',
+      );
+    }
+    var connectionPhase = 'websocket';
+    try {
+      final channel = WebSocketChannel.connect(endpoint);
+      _channel = channel;
+      await channel.ready.timeout(const Duration(seconds: 12));
+      connectionPhase = 'handshake';
+      _handshake = Completer<void>();
+      _subscription = channel.stream.listen(
+        _onMessage,
+        onError: (Object error, StackTrace stackTrace) {
+          _connected = false;
+          if (_handshake case final waiter?) {
+            if (!waiter.isCompleted) waiter.completeError(error);
+          }
+          if (!_events.isClosed) {
+            _events.addError(
+              const TranslationProviderFailure('AI gateway connection failed.'),
+            );
+          }
+        },
+        onDone: () {
+          if (_handshake case final waiter?) {
+            if (!waiter.isCompleted) {
+              waiter.completeError(
+                const TranslationProviderFailure('Gateway closed before ready.'),
+              );
+            }
+          }
+          if (_connected && !_events.isClosed) {
+            _events.addError(
+              const TranslationProviderFailure('AI gateway disconnected.'),
+            );
+          }
+          _connected = false;
+        },
+        cancelOnError: false,
+      );
+      channel.sink.add(jsonEncode({
+        'type': 'start',
+        'source_mode': translationSourceMode,
+        'source_language': source.code,
+        'target_language': target.code,
+        'format': 'pcm_s16le',
+        'sample_rate_hz': 16000,
+        'channels': 1,
+        'voice_engine': _voiceEngine,
+        if (ephemeralSessionToken.isNotEmpty)
+          'ephemeral_session_token': ephemeralSessionToken,
+      }));
+      // No microphone capture before authenticated AI session is ready.
+      await _handshake!.future.timeout(const Duration(seconds: 20));
+      _connected = true;
+    } on TranslationProviderFailure {
+      _connected = false;
+      rethrow;
+    } on TimeoutException {
+      _connected = false;
+      throw TranslationProviderFailure(
+        connectionPhase == 'websocket'
+            ? 'Gateway WebSocket connection timed out. Check mobile hotspot and port 8098.'
+            : 'Gateway handshake timed out. Check the Python server and dev session token.',
+      );
+    } on Object {
+      _connected = false;
+      throw TranslationProviderFailure(
+        connectionPhase == 'websocket'
+            ? 'Gateway WebSocket connection failed. Check hotspot IP, port 8098 and debug network access.'
+            : 'Gateway handshake failed. Check local_gateway.json token and Python server logs.',
+      );
+    }
+  }
+
+  void _onMessage(dynamic raw) {
+    try {
+      if (raw is! String) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return;
+      if (decoded['type'] == 'ready') {
+        if (decoded['source_mode'] != translationSourceMode) {
+          throw const TranslationProviderFailure('Invalid source mode.');
+        }
+        _captionOnly = decoded['caption_only'] == true;
+        _streamingAudio = decoded['streaming_audio'] == true;
+        final advertised = decoded['output_audio_paced'];
+        _outputAudioPaced = advertised is bool ? advertised : null;
+        if (kDebugMode) {
+          debugPrint('BT_SHARE_PCM gateway_pacing=${_outputAudioPaced ?? 'unknown'}');
+        }
+        if (_handshake case final waiter?) {
+          if (!waiter.isCompleted) waiter.complete();
+        }
+        return;
+      }
+      if (decoded['type'] == 'error') {
+        final reason = TranslationProviderFailure(
+          (decoded['message'] as String?) ?? 'AI service error.',
+        );
+        if (_handshake case final waiter?) {
+          if (!waiter.isCompleted) waiter.completeError(reason);
+        }
+        if (!_events.isClosed) _events.addError(reason);
+        return;
+      }
+      if (decoded['type'] == 'audio_metrics') {
+        if (_audioQueue.isClosed || decoded['source_mode'] != translationSourceMode) {
+          return;
+        }
+        final pending = decoded['pending_audio_ms'];
+        final sent = decoded['sent_audio_ms'];
+        if (pending is int && sent is int &&
+            pending >= 0 && pending <= 20000 &&
+            sent >= 0 && sent <= 1200000) {
+          _audioQueue.add(GatewayAudioQueueSnapshot(
+            pendingAudioMs: pending,
+            sentAudioMs: sent,
+          ));
+        }
+        // Diagnostic event is optional; ignore unknown/malformed metrics
+        // rather than interrupting working translations or live voice.
+        return;
+      }
+      if (decoded['type'] == 'audio_delta') {
+        if (!_streamingAudio || _audio.isClosed) return;
+        final next = decoded['sequence'];
+        final rawVoice = decoded['pcm16_base64'];
+        if (decoded['source_mode'] != translationSourceMode ||
+            decoded['sample_rate_hz'] != 24000 ||
+            decoded['channels'] != 1 ||
+            decoded['encoding'] != 'pcm_s16le' ||
+            next is! int || next != _audioSequence + 1 ||
+            rawVoice is! String || rawVoice.length > 15000) {
+          throw const TranslationProviderFailure('Invalid live voice packet.');
+        }
+        final bytes = base64Decode(rawVoice);
+        if (bytes.isEmpty || bytes.length > 9600 || bytes.length.isOdd) {
+          throw const TranslationProviderFailure('Invalid live voice PCM16 data.');
+        }
+        _audioSequence = next;
+        _audio.add(bytes);
+        return;
+      }
+      if (decoded['type'] != 'segment') return;
+      final original = decoded['original_text'];
+      final translated = decoded['translated_text'];
+      if (original is! String || translated is! String) return;
+      final base64Voice = decoded['translated_audio_base64'];
+      _events.add(TranslationSegment(
+        id: (decoded['segment_id'] as String?) ?? 'gateway-${++_sequence}',
+        original: original,
+        translated: translated,
+        receivedAt: DateTime.now(),
+        isMock: false,
+        measuredLatencyMs: decoded['latency_ms'] is int
+            ? decoded['latency_ms'] as int
+            : null,
+        voiceBytes: base64Voice is String
+            ? base64Decode(base64Voice)
+            : null,
+        audioMimeType: decoded['audio_mime_type'] as String?,
+        captionOnly: _captionOnly || decoded['caption_only'] == true,
+        streamingAudio: _streamingAudio,
+      ));
+    } on Object {
+      final reason = const TranslationProviderFailure('Invalid gateway response.');
+      if (!_audio.isClosed) _audio.addError(reason);
+      if (!_events.isClosed) _events.addError(reason);
+    }
+  }
+
+  @override
+  Future<void> sendMicrophonePcm(Uint8List data) async {
+    if (!_connected) return;
+    // Bound individual messages to the gateway's frame size.
+    for (var offset = 0; offset < data.length; offset += 32000) {
+      final end = (offset + 32000 < data.length) ? offset + 32000 : data.length;
+      final bytes = Uint8List.sublistView(data, offset, end);
+      _channel?.sink.add(jsonEncode({
+        'type': 'audio',
+        'source_mode': translationSourceMode,
+        'sequence': ++_sequence,
+        'pcm16_base64': base64Encode(bytes),
+      }));
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    _connected = false;
+    // A stop signal permits the backend to flush translated voice.
+    if (_channel != null) {
+      try {
+        _channel!.sink.add(jsonEncode({'type': 'stop'}));
+      } on StateError {
+        // The connection may already be closed following a provider failure.
+      }
+    }
+    await _subscription?.cancel();
+    await _channel?.sink.close();
+    await _audio.close();
+    await _audioQueue.close();
+    await _events.close();
+  }
+}
